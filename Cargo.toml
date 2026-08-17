@@ -1,0 +1,15 @@
+[package]
+name = "obj-tokenizer"
+version = "0.1.0"
+edition = "2024"
+license = "GPLv3"
+repository = "https://github.com/Lut99/obj-tokenizer-rs"
+description = "Common tokenizer module for https://github.com/Lut99/obj-rs and https://github.com/Lut99/mtllib-rs."
+
+
+[dependencies]
+thiserror = { version = "2.0.0", optional = true }
+
+
+[features]
+default = []
