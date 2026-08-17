@@ -35,6 +35,10 @@ pub enum Error {
     U32 { i: u64 },
     #[error("Failed to read {:?} as valid unsigned number", String::from_utf8_lossy(&raw))]
     U32Value { raw: Vec<u8>, err: std::num::ParseIntError },
+    #[error("Expected an unsigned number at position {i}")]
+    U64 { i: u64 },
+    #[error("Failed to read {:?} as valid unsigned number", String::from_utf8_lossy(&raw))]
+    U64Value { raw: Vec<u8>, err: std::num::ParseIntError },
 }
 
 
@@ -344,6 +348,51 @@ impl<R: Read> Tokenizer<R> {
                 self.i -= 1;
             }
             Error::U32Value { raw, err }
+        })?))
+    }
+
+    /// Pop a single (unsigned) long number off the stream.
+    ///
+    /// This ignores comments & whitespace up to the first digit.
+    ///
+    /// # Returns
+    /// The unsinged long or [`None`].
+    ///
+    /// # Errors
+    /// This function fails if the underlying `R`eader fails or if the stream was not spearheaded
+    /// by a digit.
+    pub fn u64(&mut self) -> Result<Option<u64>, Error> {
+        // Get a first byte in the range
+        let (i, b): (u64, u8) = match self.byte()? {
+            Some(b) => b,
+            None => return Ok(None),
+        };
+        if b < b'0' || b > b'9' {
+            self.putback.push(b);
+            self.i -= 1;
+            return Err(Error::U64 { i });
+        }
+
+        // Read until it's a newline
+        let mut raw = vec![b];
+        while let Some((_, b)) = self.next()? {
+            if b < b'0' || b > b'9' {
+                return Ok(Some(u64::from_str(String::from_utf8_lossy(&raw).trim()).map_err(|err| {
+                    for b in raw.iter().rev() {
+                        self.putback.push(*b);
+                        self.i -= 1;
+                    }
+                    Error::U64Value { raw, err }
+                })?));
+            }
+            raw.push(b);
+        }
+        Ok(Some(u64::from_str(String::from_utf8_lossy(&raw).trim()).map_err(|err| {
+            for b in raw.iter().rev() {
+                self.putback.push(*b);
+                self.i -= 1;
+            }
+            Error::U64Value { raw, err }
         })?))
     }
 
