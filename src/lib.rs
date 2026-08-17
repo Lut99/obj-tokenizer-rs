@@ -70,7 +70,7 @@ impl<R> Tokenizer<R> {
     /// A new Tokenizer that can parse tokens off the stream.
     pub const fn new(reader: R) -> Self { Self { reader, putback: Vec::new(), i: 1 } }
 }
-impl<R: Read> Tokenizer<R> {
+impl<R: std::fmt::Debug + Read> Tokenizer<R> {
     /// Gets anything off the stream.
     ///
     /// This is just a wrapper around getting a single byte off of `R`, but then such that internal
@@ -86,6 +86,8 @@ impl<R: Read> Tokenizer<R> {
         if let Some(b) = self.putback.pop() {
             let i: u64 = self.i;
             self.i += 1;
+            #[cfg(feature = "log")]
+            log::trace!(target: "obj-tokenizer", "pb <- {:?}", b as char);
             return Ok(Some((i, b)));
         }
 
@@ -94,6 +96,8 @@ impl<R: Read> Tokenizer<R> {
         if self.reader.read(std::slice::from_mut(&mut b)).map_err(Error::Read)? > 0 {
             let i: u64 = self.i;
             self.i += 1;
+            #[cfg(feature = "log")]
+            log::trace!(target: "obj-tokenizer", "rd <- {:?}", b as char);
             Ok(Some((i, b)))
         } else {
             Ok(None)
@@ -481,6 +485,8 @@ impl<R: Read> Tokenizer<R> {
             None => return Ok(None),
         };
         if (b < b'0' || b > b'9') && b != b'.' && b != b'-' {
+            self.putback.push(b);
+            self.i -= 1;
             return Err(Error::F64 { i });
         }
 
@@ -518,6 +524,28 @@ impl<R: Read> Tokenizer<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_abort() {
+        let eg1 = b"1 apple";
+        let mut tokenizer = Tokenizer::new(eg1.as_slice());
+        tokenizer.u32().unwrap().unwrap();
+        if tokenizer.u32().is_ok() {
+            panic!("What??");
+        } else {
+            assert_eq!(tokenizer.keyword().unwrap().unwrap(), b"apple");
+        }
+
+        let eg2 = b"1.0 v 1.0";
+        let mut tokenizer = Tokenizer::new(eg2.as_slice());
+        tokenizer.f64().unwrap().unwrap();
+        if tokenizer.f64().is_ok() {
+            panic!("What??");
+        } else {
+            assert_eq!(tokenizer.keyword().unwrap().unwrap(), b"v");
+            tokenizer.f64().unwrap().unwrap();
+        }
+    }
 
     #[test]
     fn test_bool() {
