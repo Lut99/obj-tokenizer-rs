@@ -70,7 +70,7 @@ impl<R> Tokenizer<R> {
     /// A new Tokenizer that can parse tokens off the stream.
     pub const fn new(reader: R) -> Self { Self { reader, putback: Vec::new(), i: 1 } }
 }
-impl<R: std::fmt::Debug + Read> Tokenizer<R> {
+impl<R: Read> Tokenizer<R> {
     /// Gets anything off the stream.
     ///
     /// This is just a wrapper around getting a single byte off of `R`, but then such that internal
