@@ -547,4 +547,42 @@ mod tests {
         assert!(matches!(Tokenizer::new(eg11.as_slice()).bool(), Err(Error::ExpectWhitespace { i: 2 })));
         assert!(matches!(Tokenizer::new(eg12.as_slice()).bool(), Err(Error::ExpectWhitespace { i: 6 })));
     }
+
+    #[test]
+    fn test_isize() {
+        let eg1 = b"1";
+        let eg2 = b"-1";
+        let eg3 = b"0";
+        let eg4 = isize::MIN.to_string().into_bytes();
+        let eg5 = isize::MAX.to_string().into_bytes();
+        let eg6 = b"a";
+        let eg7 = (isize::MIN as i128 - 1).to_string().into_bytes();
+        let eg8 = (isize::MAX as i128 + 1).to_string().into_bytes();
+
+        assert!(matches!(Tokenizer::new(eg1.as_slice()).isize(), Ok(Some(1))));
+        assert!(matches!(Tokenizer::new(eg2.as_slice()).isize(), Ok(Some(-1))));
+        assert!(matches!(Tokenizer::new(eg3.as_slice()).isize(), Ok(Some(0))));
+        assert!(matches!(Tokenizer::new(eg4.as_slice()).isize(), Ok(Some(isize::MIN))));
+        assert!(matches!(Tokenizer::new(eg5.as_slice()).isize(), Ok(Some(isize::MAX))));
+        assert!(matches!(Tokenizer::new(eg6.as_slice()).isize(), Err(Error::ISize { i: 1 })));
+        assert!(matches!(Tokenizer::new(eg7.as_slice()).isize(), Err(Error::ISizeValue { raw: _, err: _ })));
+        assert!(matches!(Tokenizer::new(eg8.as_slice()).isize(), Err(Error::ISizeValue { raw: _, err: _ })));
+    }
+
+    #[test]
+    fn test_f64() {
+        let eg1 = b"1";
+        let eg2 = b"-1.0";
+        let eg3 = b"0.0000";
+        let eg4 = f64::MIN.to_string().into_bytes();
+        let eg5 = f64::MAX.to_string().into_bytes();
+        let eg6 = b"a";
+
+        assert!(matches!(Tokenizer::new(eg1.as_slice()).f64(), Ok(Some(1.0))));
+        assert!(matches!(Tokenizer::new(eg2.as_slice()).f64(), Ok(Some(-1.0))));
+        assert!(matches!(Tokenizer::new(eg3.as_slice()).f64(), Ok(Some(0.0))));
+        assert!(matches!(Tokenizer::new(eg4.as_slice()).f64(), Ok(Some(f64::MIN))));
+        assert!(matches!(Tokenizer::new(eg5.as_slice()).f64(), Ok(Some(f64::MAX))));
+        assert!(matches!(Tokenizer::new(eg6.as_slice()).f64(), Err(Error::F64 { i: 1 })));
+    }
 }
