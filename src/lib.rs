@@ -15,6 +15,14 @@ use thiserror::Error;
 /// Defines errors occurring in the [`Tokenizer`].
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("Expected a boolean value ('0', '1', 'on', 'off', 'true', 'false', 'yes' or 'no') at position {i}")]
+    Bool { i: u64 },
+    #[error("Expected 'on' or 'off' at position {i}")]
+    BoolO { i: u64 },
+    #[error("Expected byte {b:?} at position {i}")]
+    Expect { i: u64, b: u8 },
+    #[error("Expected whitespace at position {i}")]
+    ExpectWhitespace { i: u64 },
     #[error("Expected a floating-point number at position {i}")]
     F64 { i: u64 },
     #[error("Failed to read {:?} as valid floating-point number", String::from_utf8_lossy(&raw))]
@@ -73,6 +81,55 @@ impl<R: Read> Tokenizer<R> {
         } else {
             Ok(None)
         }
+    }
+
+    /// Gets the next mandatory character sequence off the stream.
+    ///
+    /// This does NOT ignore comments & whitespace!
+    ///
+    /// # Arguments
+    /// - `bs`: The bytes to expect.
+    ///
+    /// # Errors
+    /// This function fails if the underlying `R`eader fails, or else if the stream was not headed
+    /// by the given `bs`.
+    pub fn expect(&mut self, bs: &[u8]) -> Result<(), Error> {
+        let mut i: usize = 0;
+        while i < bs.len() {
+            let next: u8 = self.next()?.ok_or_else(|| Error::Expect { i: self.i, b: bs[i] })?.1;
+            if next != bs[i] {
+                return Err(Error::Expect { i: self.i, b: bs[i] });
+            }
+            i += 1;
+        }
+        Ok(())
+    }
+
+    /// Pops a single whitespace character off the stream.
+    ///
+    /// This can be used to express that a punctuation is expected.
+    ///
+    /// # Errors
+    /// This function fails if the underlying `R`eader fails, or else if the stream was not headed
+    /// by a whitespace
+    pub fn expect_whitespace(&mut self) -> Result<(), Error> {
+        enum State {
+            Start,
+            Comment,
+        }
+
+        let mut state = State::Start;
+        while let Some((i, b)) = self.next()? {
+            match state {
+                State::Start if b == b' ' || b == b'\t' || b == b'\r' || b == b'\n' => return Ok(()),
+                State::Start if b == b'#' => state = State::Comment,
+                State::Start => return Err(Error::ExpectWhitespace { i }),
+
+                State::Comment if b == b'\n' => return Ok(()),
+                State::Comment => continue,
+            }
+        }
+        Ok(())
     }
 
     /// Gets the next character off the stream.
@@ -164,6 +221,64 @@ impl<R: Read> Tokenizer<R> {
         Ok(Some(String::from_utf8_lossy(&s).trim().into()))
     }
 
+    /// Pop a single boolean off the stream.
+    ///
+    /// True values are `1`, `on`, `true` and `yes`. False values are `0`, `off`, `false` and `no`.
+    ///
+    /// This ignores comments & whitespace up to the first valid char.
+    ///
+    /// # Returns
+    /// The bool or [`None`].
+    ///
+    /// # Errors
+    /// This function fails if the underlying `R`eader fails or if the stream was not spearheaded
+    /// by a valid bool char
+    pub fn bool(&mut self) -> Result<Option<bool>, Error> {
+        // Get a first byte in the range
+        let (i, b): (u64, u8) = match self.byte()? {
+            Some(b) => b,
+            None => return Ok(None),
+        };
+        match b {
+            // Digits
+            b'1' => self.expect_whitespace().map(|_| Some(true)),
+            b'0' => self.expect_whitespace().map(|_| Some(false)),
+
+            // Power states
+            b'o' => match self.next()? {
+                Some((_, b'n')) => self.expect_whitespace().map(|_| Some(true)),
+                Some((_, b'f')) => {
+                    self.expect(b"f")?;
+                    self.expect_whitespace().map(|_| Some(false))
+                },
+                _ => Err(Error::BoolO { i }),
+            },
+
+            // Booleans
+            b't' => {
+                self.expect(b"rue")?;
+                self.expect_whitespace().map(|_| Some(true))
+            },
+            b'f' => {
+                self.expect(b"alse")?;
+                self.expect_whitespace().map(|_| Some(false))
+            },
+
+            // Answers
+            b'y' => {
+                self.expect(b"es")?;
+                self.expect_whitespace().map(|_| Some(true))
+            },
+            b'n' => {
+                self.expect(b"o")?;
+                self.expect_whitespace().map(|_| Some(false))
+            },
+
+            // Anything else is unexpected
+            _ => Err(Error::Bool { i }),
+        }
+    }
+
     /// Pop a single (unsigned) integer number off the stream.
     ///
     /// This ignores comments & whitespace up to the first digit.
@@ -224,5 +339,44 @@ impl<R: Read> Tokenizer<R> {
             raw.push(b);
         }
         Ok(Some(f64::from_str(String::from_utf8_lossy(&raw).trim()).map_err(|err| Error::F64Value { raw, err })?))
+    }
+}
+
+
+
+
+
+/***** TESTS *****/
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bool() {
+        let eg1 = b"1";
+        let eg2 = b"on";
+        let eg3 = b"true";
+        let eg4 = b"yes";
+        let eg5 = b"0";
+        let eg6 = b"off";
+        let eg7 = b"false";
+        let eg8 = b"no";
+        let eg9 = b"a";
+        let eg10 = b"o";
+        let eg11 = b"10";
+        let eg12 = b"falser";
+
+        assert!(matches!(Tokenizer::new(eg1.as_slice()).bool(), Ok(Some(true))));
+        assert!(matches!(Tokenizer::new(eg2.as_slice()).bool(), Ok(Some(true))));
+        assert!(matches!(Tokenizer::new(eg3.as_slice()).bool(), Ok(Some(true))));
+        assert!(matches!(Tokenizer::new(eg4.as_slice()).bool(), Ok(Some(true))));
+        assert!(matches!(Tokenizer::new(eg5.as_slice()).bool(), Ok(Some(false))));
+        assert!(matches!(Tokenizer::new(eg6.as_slice()).bool(), Ok(Some(false))));
+        assert!(matches!(Tokenizer::new(eg7.as_slice()).bool(), Ok(Some(false))));
+        assert!(matches!(Tokenizer::new(eg8.as_slice()).bool(), Ok(Some(false))));
+        assert!(matches!(Tokenizer::new(eg9.as_slice()).bool(), Err(Error::Bool { i: 1 })));
+        assert!(matches!(Tokenizer::new(eg10.as_slice()).bool(), Err(Error::BoolO { i: 1 })));
+        assert!(matches!(Tokenizer::new(eg11.as_slice()).bool(), Err(Error::ExpectWhitespace { i: 2 })));
+        assert!(matches!(Tokenizer::new(eg12.as_slice()).bool(), Err(Error::ExpectWhitespace { i: 6 })));
     }
 }
