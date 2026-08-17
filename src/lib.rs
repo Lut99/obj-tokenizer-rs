@@ -433,7 +433,7 @@ impl<R: Read> Tokenizer<R> {
             Some(b) => b,
             None => return Ok(None),
         };
-        if b < b'0' || b > b'9' {
+        if (b < b'0' || b > b'9') && b != b'-' {
             self.putback.push(b);
             self.i -= 1;
             return Err(Error::ISize { i });
@@ -442,7 +442,7 @@ impl<R: Read> Tokenizer<R> {
         // Read until it's a newline
         let mut raw = vec![b];
         while let Some((_, b)) = self.next()? {
-            if b < b'0' || b > b'9' {
+            if (b < b'0' || b > b'9') && b != b'-' {
                 self.putback.push(b);
                 self.i -= 1;
                 return Ok(Some(isize::from_str(String::from_utf8_lossy(&raw).trim()).map_err(|err| {
@@ -480,14 +480,14 @@ impl<R: Read> Tokenizer<R> {
             Some(b) => b,
             None => return Ok(None),
         };
-        if (b < b'0' || b > b'9') && b != b'.' {
+        if (b < b'0' || b > b'9') && b != b'.' && b != b'-' {
             return Err(Error::F64 { i });
         }
 
         // Read until it's a newline
         let mut raw = vec![b];
         while let Some((_, b)) = self.next()? {
-            if (b < b'0' || b > b'9') && b != b'.' {
+            if (b < b'0' || b > b'9') && b != b'.' && b != b'-' {
                 self.putback.push(b);
                 self.i -= 1;
                 return Ok(Some(f64::from_str(String::from_utf8_lossy(&raw).trim()).map_err(|err| {
