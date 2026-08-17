@@ -120,6 +120,8 @@ impl<R: Read> Tokenizer<R> {
                 })?
                 .1;
             if next != bs[i] {
+                self.putback.push(next);
+                self.i -= 1;
                 while i > 0 {
                     self.putback.push(bs[i]);
                     self.i -= 1;
