@@ -109,7 +109,16 @@ impl<R: Read> Tokenizer<R> {
     pub fn expect(&mut self, bs: &[u8]) -> Result<(), Error> {
         let mut i: usize = 0;
         while i < bs.len() {
-            let next: u8 = self.next()?.ok_or_else(|| Error::Expect { i: self.i, b: bs[i] })?.1;
+            let next: u8 = self
+                .next()?
+                .ok_or_else(|| {
+                    while i > 0 {
+                        self.putback.push(bs[i]);
+                        self.i -= 1;
+                    }
+                    Error::Expect { i: self.i, b: bs[i] }
+                })?
+                .1;
             if next != bs[i] {
                 while i > 0 {
                     self.putback.push(bs[i]);
@@ -208,6 +217,8 @@ impl<R: Read> Tokenizer<R> {
         let mut keyword = vec![b];
         while let Some((_, b)) = self.next()? {
             if (b < b'a' || b > b'z') && (b < b'A' || b > b'Z') && b != b'_' {
+                self.putback.push(b);
+                self.i -= 1;
                 return Ok(Some(keyword));
             }
             keyword.push(b);
@@ -332,6 +343,8 @@ impl<R: Read> Tokenizer<R> {
         let mut raw = vec![b];
         while let Some((_, b)) = self.next()? {
             if b < b'0' || b > b'9' {
+                self.putback.push(b);
+                self.i -= 1;
                 return Ok(Some(u32::from_str(String::from_utf8_lossy(&raw).trim()).map_err(|err| {
                     for b in raw.iter().rev() {
                         self.putback.push(*b);
@@ -377,6 +390,8 @@ impl<R: Read> Tokenizer<R> {
         let mut raw = vec![b];
         while let Some((_, b)) = self.next()? {
             if b < b'0' || b > b'9' {
+                self.putback.push(b);
+                self.i -= 1;
                 return Ok(Some(u64::from_str(String::from_utf8_lossy(&raw).trim()).map_err(|err| {
                     for b in raw.iter().rev() {
                         self.putback.push(*b);
@@ -420,6 +435,8 @@ impl<R: Read> Tokenizer<R> {
         let mut raw = vec![b];
         while let Some((_, b)) = self.next()? {
             if (b < b'0' || b > b'9') && b != b'.' {
+                self.putback.push(b);
+                self.i -= 1;
                 return Ok(Some(f64::from_str(String::from_utf8_lossy(&raw).trim()).map_err(|err| {
                     for b in raw.iter().rev() {
                         self.putback.push(*b);
