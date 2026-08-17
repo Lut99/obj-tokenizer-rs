@@ -48,8 +48,9 @@ pub enum Error {
 /// # Generics
 /// - `R`: The type of the wrapper reader.
 pub struct Tokenizer<R> {
-    reader: R,
-    pub i:  u64,
+    reader:  R,
+    putback: Vec<u8>,
+    pub i:   u64,
 }
 impl<R> Tokenizer<R> {
     /// Constructor for the Tokenizer.
@@ -59,7 +60,7 @@ impl<R> Tokenizer<R> {
     ///
     /// # Returns
     /// A new Tokenizer that can parse tokens off the stream.
-    pub const fn new(reader: R) -> Self { Self { reader, i: 1 } }
+    pub const fn new(reader: R) -> Self { Self { reader, putback: Vec::new(), i: 1 } }
 }
 impl<R: Read> Tokenizer<R> {
     /// Gets anything off the stream.
@@ -73,6 +74,14 @@ impl<R: Read> Tokenizer<R> {
     /// # Errors
     /// This function fails if the underlying `R`eader fails.
     pub fn next(&mut self) -> Result<Option<(u64, u8)>, Error> {
+        // First check if we need to return any putbacks
+        if let Some(b) = self.putback.pop() {
+            let i: u64 = self.i;
+            self.i += 1;
+            return Ok(Some((i, b)));
+        }
+
+        // Then pop off the stream
         let mut b: u8 = 0;
         if self.reader.read(std::slice::from_mut(&mut b)).map_err(Error::Read)? > 0 {
             let i: u64 = self.i;
@@ -98,6 +107,10 @@ impl<R: Read> Tokenizer<R> {
         while i < bs.len() {
             let next: u8 = self.next()?.ok_or_else(|| Error::Expect { i: self.i, b: bs[i] })?.1;
             if next != bs[i] {
+                while i > 0 {
+                    self.putback.push(bs[i]);
+                    self.i -= 1;
+                }
                 return Err(Error::Expect { i: self.i, b: bs[i] });
             }
             i += 1;
@@ -123,7 +136,11 @@ impl<R: Read> Tokenizer<R> {
             match state {
                 State::Start if b == b' ' || b == b'\t' || b == b'\r' || b == b'\n' => return Ok(()),
                 State::Start if b == b'#' => state = State::Comment,
-                State::Start => return Err(Error::ExpectWhitespace { i }),
+                State::Start => {
+                    self.putback.push(b);
+                    self.i -= 1;
+                    return Err(Error::ExpectWhitespace { i });
+                },
 
                 State::Comment if b == b'\n' => return Ok(()),
                 State::Comment => continue,
@@ -178,6 +195,8 @@ impl<R: Read> Tokenizer<R> {
             None => return Ok(None),
         };
         if (b < b'a' || b > b'z') && (b < b'A' || b > b'Z') {
+            self.putback.push(b);
+            self.i -= 1;
             return Err(Error::Keyword { i });
         }
 
@@ -275,7 +294,11 @@ impl<R: Read> Tokenizer<R> {
             },
 
             // Anything else is unexpected
-            _ => Err(Error::Bool { i }),
+            _ => {
+                self.putback.push(b);
+                self.i -= 1;
+                Err(Error::Bool { i })
+            },
         }
     }
 
@@ -296,6 +319,8 @@ impl<R: Read> Tokenizer<R> {
             None => return Ok(None),
         };
         if b < b'0' || b > b'9' {
+            self.putback.push(b);
+            self.i -= 1;
             return Err(Error::U32 { i });
         }
 
@@ -303,11 +328,23 @@ impl<R: Read> Tokenizer<R> {
         let mut raw = vec![b];
         while let Some((_, b)) = self.next()? {
             if b < b'0' || b > b'9' {
-                return Ok(Some(u32::from_str(String::from_utf8_lossy(&raw).trim()).map_err(|err| Error::U32Value { raw, err })?));
+                return Ok(Some(u32::from_str(String::from_utf8_lossy(&raw).trim()).map_err(|err| {
+                    for b in raw.iter().rev() {
+                        self.putback.push(*b);
+                        self.i -= 1;
+                    }
+                    Error::U32Value { raw, err }
+                })?));
             }
             raw.push(b);
         }
-        Ok(Some(u32::from_str(String::from_utf8_lossy(&raw).trim()).map_err(|err| Error::U32Value { raw, err })?))
+        Ok(Some(u32::from_str(String::from_utf8_lossy(&raw).trim()).map_err(|err| {
+            for b in raw.iter().rev() {
+                self.putback.push(*b);
+                self.i -= 1;
+            }
+            Error::U32Value { raw, err }
+        })?))
     }
 
     /// Pop a single floating-point number off the stream.
@@ -334,11 +371,23 @@ impl<R: Read> Tokenizer<R> {
         let mut raw = vec![b];
         while let Some((_, b)) = self.next()? {
             if (b < b'0' || b > b'9') && b != b'.' {
-                return Ok(Some(f64::from_str(String::from_utf8_lossy(&raw).trim()).map_err(|err| Error::F64Value { raw, err })?));
+                return Ok(Some(f64::from_str(String::from_utf8_lossy(&raw).trim()).map_err(|err| {
+                    for b in raw.iter().rev() {
+                        self.putback.push(*b);
+                        self.i -= 1;
+                    }
+                    Error::F64Value { raw, err }
+                })?));
             }
             raw.push(b);
         }
-        Ok(Some(f64::from_str(String::from_utf8_lossy(&raw).trim()).map_err(|err| Error::F64Value { raw, err })?))
+        Ok(Some(f64::from_str(String::from_utf8_lossy(&raw).trim()).map_err(|err| {
+            for b in raw.iter().rev() {
+                self.putback.push(*b);
+                self.i -= 1;
+            }
+            Error::F64Value { raw, err }
+        })?))
     }
 }
 
