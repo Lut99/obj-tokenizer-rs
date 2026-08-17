@@ -27,6 +27,10 @@ pub enum Error {
     F64 { i: u64 },
     #[error("Failed to read {:?} as valid floating-point number", String::from_utf8_lossy(&raw))]
     F64Value { raw: Vec<u8>, err: std::num::ParseFloatError },
+    #[error("Expected a signed number at position {i}")]
+    ISize { i: u64 },
+    #[error("Failed to read {:?} as valid signed number", String::from_utf8_lossy(&raw))]
+    ISizeValue { raw: Vec<u8>, err: std::num::ParseIntError },
     #[error("Failed to read from reader")]
     Read(#[source] std::io::Error),
     #[error("Expected a keyword at position {i}")]
@@ -410,6 +414,53 @@ impl<R: Read> Tokenizer<R> {
                 self.i -= 1;
             }
             Error::U64Value { raw, err }
+        })?))
+    }
+
+    /// Pop a single (signed) address-length number off the stream.
+    ///
+    /// This ignores comments & whitespace up to the first digit.
+    ///
+    /// # Returns
+    /// The unsinged long or [`None`].
+    ///
+    /// # Errors
+    /// This function fails if the underlying `R`eader fails or if the stream was not spearheaded
+    /// by a digit.
+    pub fn isize(&mut self) -> Result<Option<isize>, Error> {
+        // Get a first byte in the range
+        let (i, b): (u64, u8) = match self.byte()? {
+            Some(b) => b,
+            None => return Ok(None),
+        };
+        if b < b'0' || b > b'9' {
+            self.putback.push(b);
+            self.i -= 1;
+            return Err(Error::ISize { i });
+        }
+
+        // Read until it's a newline
+        let mut raw = vec![b];
+        while let Some((_, b)) = self.next()? {
+            if b < b'0' || b > b'9' {
+                self.putback.push(b);
+                self.i -= 1;
+                return Ok(Some(isize::from_str(String::from_utf8_lossy(&raw).trim()).map_err(|err| {
+                    for b in raw.iter().rev() {
+                        self.putback.push(*b);
+                        self.i -= 1;
+                    }
+                    Error::ISizeValue { raw, err }
+                })?));
+            }
+            raw.push(b);
+        }
+        Ok(Some(isize::from_str(String::from_utf8_lossy(&raw).trim()).map_err(|err| {
+            for b in raw.iter().rev() {
+                self.putback.push(*b);
+                self.i -= 1;
+            }
+            Error::ISizeValue { raw, err }
         })?))
     }
 
